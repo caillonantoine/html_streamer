@@ -9,4 +9,5 @@ dependencies = [
     "flask-sock>=0.7.0",
     "pyopenssl>=26.3.0",
     "qrcode>=8.2",
+    "pillow>=11.0.0",
 ]

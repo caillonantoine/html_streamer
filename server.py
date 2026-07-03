@@ -7,13 +7,18 @@
 
 import socket
 import qrcode
-import subprocess
-import logging
+import base64
+import io
+import threading
+import time
+import math
+import glob
+import os
 import uuid
 import sys
 import json
-from datetime import datetime
-from flask import Flask, render_template_string, request
+from PIL import Image
+from flask import Flask, render_template_string, request, jsonify
 from flask_sock import Sock
 
 # Silence Werkzeug logging
@@ -102,6 +107,7 @@ HTML_PAGE = """
         <button id="toggleBtn" disabled>Start Recording</button>
         <button id="convertBtn">Convert Recordings to MP4</button>
         <button id="snapshotBtn">Snapshot</button>
+        <img id="gridOverlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; object-fit: contain; background: black;">
     </div>
     <div id="video-container">
         <video id="v" autoplay playsinline muted></video>
@@ -114,6 +120,7 @@ HTML_PAGE = """
         const videoSource = document.getElementById('videoSource');
         const convertBtn = document.getElementById('convertBtn');
         const snapshotBtn = document.getElementById('snapshotBtn');
+        const gridOverlay = document.getElementById('gridOverlay');
         let ws;
         let recorder;
         let wakeLock = null;
@@ -152,7 +159,16 @@ HTML_PAGE = """
                     toggleBtn.textContent = 'Start Recording';
                 }
                 if (cmd.action === 'snapshot') {
-                    takeSnapshot();
+                    takeSnapshot(cmd.session_id);
+                }
+                if (cmd.action === 'show_grid') {
+                    gridOverlay.src = 'data:image/jpeg;base64,' + cmd.image_data;
+                    gridOverlay.style.display = 'block';
+                    v.style.display = 'none';
+                    setTimeout(() => {
+                        gridOverlay.style.display = 'none';
+                        v.style.display = 'block';
+                    }, 4000);
                 }
                 if (cmd.action === 'stop_all') {
                     stopLocalRecording();
@@ -239,7 +255,7 @@ HTML_PAGE = """
 
         let uploadQueue = Promise.resolve();
 
-        function takeSnapshot() {
+        function takeSnapshot(sessionId) {
             const canvas = document.createElement('canvas');
             canvas.width = v.videoWidth;
             canvas.height = v.videoHeight;
@@ -247,7 +263,7 @@ HTML_PAGE = """
             canvas.toBlob(blob => {
                 const formData = new FormData();
                 formData.append('snapshot', blob, 'snapshot.jpg');
-                formData.append('timestamp', new Date().toISOString());
+                formData.append('session_id', sessionId);
                 fetch('/upload_snapshot', { method: 'POST', body: formData });
             }, 'image/jpeg');
         }
@@ -315,11 +331,41 @@ def upload_chunk():
 
 @app.route('/upload_snapshot', methods=['POST'])
 def upload_snapshot():
-    timestamp = request.form['timestamp'].replace(':', '-').replace('.', '-')
+    session_id = request.form['session_id']
     file = request.files['snapshot']
-    filename = f"snapshot_{timestamp}.jpg"
+    filename = f"snapshot_{session_id}_{uuid.uuid4().hex[:6]}.jpg"
     file.save(filename)
     return "OK", 200
+
+def process_grid(session_id):
+    time.sleep(2)  # Wait for uploads
+    files = glob.glob(f"snapshot_{session_id}_*.jpg")
+    if not files: return
+    
+    images = [Image.open(f) for f in files]
+    n = len(images)
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    
+    # Simple resize for uniform grid
+    w, h = images[0].size
+    grid_img = Image.new('RGB', (w * cols, h * rows))
+    
+    for i, img in enumerate(images):
+        grid_img.paste(img, ((i % cols) * w, (i // cols) * h))
+    
+    # Save to buffer
+    buffered = io.BytesIO()
+    grid_img.save(buffered, format="JPEG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    # Broadcast to all
+    msg = json.dumps({'action': 'show_grid', 'image_data': img_str})
+    for conn in connections:
+        conn.send(msg)
+        
+    # Cleanup
+    for f in files: os.remove(f)
 
 @sock.route('/stream')
 def stream(ws):
@@ -332,6 +378,14 @@ def stream(ws):
             # We only handle string (JSON) commands now
             if isinstance(data, str):
                 cmd = json.loads(data)
+                if cmd.get('action') == 'snapshot':
+                    session_id = uuid.uuid4().hex
+                    # Broadcast to clients
+                    for conn in connections:
+                        conn.send(json.dumps({'action': 'snapshot', 'session_id': session_id}))
+                    # Start processor
+                    threading.Thread(target=process_grid, args=(session_id,)).start()
+                
                 if cmd.get('action') == 'convert':
                     # Run conversion in background
                     subprocess.Popen(['bash', '-c', 'find . -name "*.webm" -exec ffmpeg -y -i {} -r 30 -crf 15 -b:a 128k {}.mp4 \; -exec rm {} \;'])
