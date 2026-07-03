@@ -98,10 +98,10 @@ HTML_PAGE = """
     <div id="controls">
         <select id="videoSource"></select>
         <input type="text" id="prefixInput" placeholder="Enter file prefix...">
-        <button id="initBtn">Enable Camera</button>
+        <button id="cameraToggleBtn">Start Camera</button>
         <button id="toggleBtn" disabled>Start Recording</button>
         <button id="convertBtn">Convert Recordings to MP4</button>
-        <button id="stopAllBtn" style="background-color: #ffcccc;">Stop All Cameras</button>
+        <button id="snapshotBtn">Snapshot</button>
     </div>
     <div id="video-container">
         <video id="v" autoplay playsinline muted></video>
@@ -109,11 +109,11 @@ HTML_PAGE = """
     
     <script>
         const v = document.getElementById('v');
-        const initBtn = document.getElementById('initBtn');
+        const cameraToggleBtn = document.getElementById('cameraToggleBtn');
         const toggleBtn = document.getElementById('toggleBtn');
         const videoSource = document.getElementById('videoSource');
         const convertBtn = document.getElementById('convertBtn');
-        const stopAllBtn = document.getElementById('stopAllBtn');
+        const snapshotBtn = document.getElementById('snapshotBtn');
         let ws;
         let recorder;
         let wakeLock = null;
@@ -151,6 +151,9 @@ HTML_PAGE = """
                     stopLocalRecording();
                     toggleBtn.textContent = 'Start Recording';
                 }
+                if (cmd.action === 'snapshot') {
+                    takeSnapshot();
+                }
                 if (cmd.action === 'stop_all') {
                     stopLocalRecording();
                     if (v.srcObject) {
@@ -164,7 +167,7 @@ HTML_PAGE = """
                     }
                     toggleBtn.textContent = 'Start Recording';
                     toggleBtn.disabled = true;
-                    initBtn.disabled = false;
+                    cameraToggleBtn.textContent = 'Start Camera';
                 }
             }
         };
@@ -182,23 +185,27 @@ HTML_PAGE = """
         }
 
         // Initialize: Get Camera Access
-        initBtn.onclick = async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        width: { ideal: 1280 }, 
-                        height: { ideal: 720 },
-                        aspectRatio: { ideal: 16/9 }
-                    }, 
-                    audio: true 
-                });
-                v.srcObject = stream;
-                await refreshDevices();
-                await requestWakeLock();
-                initBtn.disabled = true;
-                toggleBtn.disabled = false;
-            } catch (err) {
-                alert("Camera access denied or resolution not supported: " + err);
+        cameraToggleBtn.onclick = async () => {
+            if (cameraToggleBtn.textContent === 'Start Camera') {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            width: { ideal: 1280 }, 
+                            height: { ideal: 720 },
+                            aspectRatio: { ideal: 16/9 }
+                        }, 
+                        audio: true 
+                    });
+                    v.srcObject = stream;
+                    await refreshDevices();
+                    await requestWakeLock();
+                    toggleBtn.disabled = false;
+                    cameraToggleBtn.textContent = 'Stop All Cameras';
+                } catch (err) {
+                    alert("Camera access denied or resolution not supported: " + err);
+                }
+            } else {
+                ws.send(JSON.stringify({action: 'stop_all'}));
             }
         };
 
@@ -228,9 +235,22 @@ HTML_PAGE = """
             ws.send(JSON.stringify({action: action}));
         };
         convertBtn.onclick = () => ws.send(JSON.stringify({action: 'convert'}));
-        stopAllBtn.onclick = () => ws.send(JSON.stringify({action: 'stop_all'}));
+        snapshotBtn.onclick = () => ws.send(JSON.stringify({action: 'snapshot'}));
 
         let uploadQueue = Promise.resolve();
+
+        function takeSnapshot() {
+            const canvas = document.createElement('canvas');
+            canvas.width = v.videoWidth;
+            canvas.height = v.videoHeight;
+            canvas.getContext('2d').drawImage(v, 0, 0);
+            canvas.toBlob(blob => {
+                const formData = new FormData();
+                formData.append('snapshot', blob, 'snapshot.jpg');
+                formData.append('timestamp', new Date().toISOString());
+                fetch('/upload_snapshot', { method: 'POST', body: formData });
+            }, 'image/jpeg');
+        }
 
         function startLocalRecording() {
             const recordingId = uuidv4(); 
@@ -291,6 +311,14 @@ def upload_chunk():
     # 'ab' mode opens the file for appending in binary mode
     with open(filename, 'ab') as f:
         f.write(file.read())
+    return "OK", 200
+
+@app.route('/upload_snapshot', methods=['POST'])
+def upload_snapshot():
+    timestamp = request.form['timestamp'].replace(':', '-').replace('.', '-')
+    file = request.files['snapshot']
+    filename = f"snapshot_{timestamp}.jpg"
+    file.save(filename)
     return "OK", 200
 
 @sock.route('/stream')
