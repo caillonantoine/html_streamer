@@ -5,27 +5,30 @@
 # ]
 # ///
 
-import socket
-import qrcode
 import base64
+import glob
 import io
+import json
+import math
+import os
+import socket
+import subprocess
+import sys
 import threading
 import time
-import math
-import glob
-import os
 import uuid
-import sys
-import json
-from PIL import Image
-from flask import Flask, render_template_string, request, jsonify
+
+import qrcode
+from flask import Flask, jsonify, render_template_string, request
 from flask_sock import Sock
+from PIL import Image
 
 # Silence Werkzeug logging
 # logging.getLogger('werkzeug').disabled = True
 app = Flask(__name__)
 # app.logger.disabled = True
 sock = Sock(app)
+
 
 # Helper to get local IP
 def get_local_ip():
@@ -40,6 +43,7 @@ def get_local_ip():
         s.close()
     return IP
 
+
 def print_qr_code(url):
     qr = qrcode.QRCode(version=1, box_size=1, border=2)
     qr.add_data(url)
@@ -47,6 +51,7 @@ def print_qr_code(url):
     print(f"\nScan this QR code to access the stream:\n{url}\n")
     qr.print_ascii()
     print("\n")
+
 
 connections = set()
 
@@ -313,9 +318,11 @@ HTML_PAGE = """
 </html>
 """
 
+
 @app.route('/')
 def index():
     return render_template_string(HTML_PAGE)
+
 
 @app.route('/upload_chunk', methods=['POST'])
 def upload_chunk():
@@ -329,6 +336,7 @@ def upload_chunk():
         f.write(file.read())
     return "OK", 200
 
+
 @app.route('/upload_snapshot', methods=['POST'])
 def upload_snapshot():
     session_id = request.form['session_id']
@@ -337,36 +345,43 @@ def upload_snapshot():
     file.save(filename)
     return "OK", 200
 
+
 def process_grid(session_id, initiator_ws):
     time.sleep(2)  # Wait for uploads
     files = glob.glob(f"snapshot_{session_id}_*.jpg")
     if not files: return
-    
+
     images = [Image.open(f) for f in files]
     n = len(images)
     cols = math.ceil(math.sqrt(n))
     rows = math.ceil(n / cols)
-    
+
     # Simple resize for uniform grid
     w, h = images[0].size
     grid_img = Image.new('RGB', (w * cols, h * rows))
-    
+
     for i, img in enumerate(images):
         grid_img.paste(img, ((i % cols) * w, (i // cols) * h))
-    
+
     # Save to buffer
     buffered = io.BytesIO()
     grid_img.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
-    
+
     # Send only to the initiator
     try:
-        initiator_ws.send(json.dumps({'action': 'show_grid', 'image_data': img_str}))
+        initiator_ws.send(
+            json.dumps({
+                'action': 'show_grid',
+                'image_data': img_str
+            }))
     except Exception as e:
         print(f"Failed to send grid to initiator: {e}")
-        
+
     # Cleanup
-    for f in files: os.remove(f)
+    for f in files:
+        os.remove(f)
+
 
 @sock.route('/stream')
 def stream(ws):
@@ -375,7 +390,7 @@ def stream(ws):
         while True:
             data = ws.receive()
             if data is None: break
-            
+
             # We only handle string (JSON) commands now
             if isinstance(data, str):
                 cmd = json.loads(data)
@@ -383,21 +398,30 @@ def stream(ws):
                     session_id = uuid.uuid4().hex
                     # Broadcast to clients
                     for conn in connections:
-                        conn.send(json.dumps({'action': 'snapshot', 'session_id': session_id}))
+                        conn.send(
+                            json.dumps({
+                                'action': 'snapshot',
+                                'session_id': session_id
+                            }))
                     # Start processor
-                    threading.Thread(target=process_grid, args=(session_id, ws)).start()
-                
+                    threading.Thread(target=process_grid,
+                                     args=(session_id, ws)).start()
+
                 if cmd.get('action') == 'convert':
                     # Run conversion in background
-                    subprocess.Popen(['bash', '-c', 'find . -name "*.webm" -exec ffmpeg -y -i {} -r 30 -crf 15 -b:a 128k {}.mp4 \; -exec rm {} \;'])
+                    subprocess.Popen([
+                        'bash', '-c',
+                        r'find . -name "*.webm" -exec ffmpeg -y -i {} -r 30 -crf 15 -b:a 128k {}.mp4 \; -exec rm {} \;'
+                    ])
                     print("Conversion started", file=sys.stderr)
-                
+
                 # Broadcast command to everyone
                 for conn in connections:
                     conn.send(data)
-                    
+
     finally:
         connections.remove(ws)
+
 
 if __name__ == '__main__':
     host = '0.0.0.0'
@@ -405,4 +429,8 @@ if __name__ == '__main__':
     local_ip = get_local_ip()
     url = f"https://{local_ip}:{port}"
     print_qr_code(url)
-    app.run(host=host, port=port, threaded=True, ssl_context='adhoc', debug=True)
+    app.run(host=host,
+            port=port,
+            threaded=True,
+            ssl_context='adhoc',
+            debug=True)

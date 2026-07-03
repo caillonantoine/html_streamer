@@ -10,4 +10,6 @@ dependencies = [
     "pyopenssl>=26.3.0",
     "qrcode>=8.2",
     "pillow>=11.0.0",
+    "yapf>=0.43.0",
+    "isort>=8.0.1",
 ]
