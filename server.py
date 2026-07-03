@@ -215,7 +215,11 @@ HTML_PAGE = """
                             height: { ideal: 720 },
                             aspectRatio: { ideal: 16/9 }
                         }, 
-                        audio: true 
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        } 
                     });
                     v.srcObject = stream;
                     await refreshDevices();
@@ -242,7 +246,11 @@ HTML_PAGE = """
                         height: { ideal: 720 },
                         aspectRatio: { ideal: 16/9 }
                     }, 
-                    audio: true 
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    } 
                 });
                 v.srcObject = newStream;
             } catch (err) {
