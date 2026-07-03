@@ -337,7 +337,7 @@ def upload_snapshot():
     file.save(filename)
     return "OK", 200
 
-def process_grid(session_id):
+def process_grid(session_id, initiator_ws):
     time.sleep(2)  # Wait for uploads
     files = glob.glob(f"snapshot_{session_id}_*.jpg")
     if not files: return
@@ -359,10 +359,11 @@ def process_grid(session_id):
     grid_img.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
     
-    # Broadcast to all
-    msg = json.dumps({'action': 'show_grid', 'image_data': img_str})
-    for conn in connections:
-        conn.send(msg)
+    # Send only to the initiator
+    try:
+        initiator_ws.send(json.dumps({'action': 'show_grid', 'image_data': img_str}))
+    except Exception as e:
+        print(f"Failed to send grid to initiator: {e}")
         
     # Cleanup
     for f in files: os.remove(f)
@@ -384,7 +385,7 @@ def stream(ws):
                     for conn in connections:
                         conn.send(json.dumps({'action': 'snapshot', 'session_id': session_id}))
                     # Start processor
-                    threading.Thread(target=process_grid, args=(session_id,)).start()
+                    threading.Thread(target=process_grid, args=(session_id, ws)).start()
                 
                 if cmd.get('action') == 'convert':
                     # Run conversion in background
