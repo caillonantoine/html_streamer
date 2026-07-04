@@ -19,7 +19,7 @@ import time
 import uuid
 
 import qrcode
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, render_template_string, request
 from flask_sock import Sock
 from PIL import Image
 
@@ -338,10 +338,10 @@ def upload_chunk():
     prefix = request.form['prefix']
     timestamp = request.form['timestamp']
     file = request.files['chunk']
-    
+
     # Create subfolder for the recording session
     os.makedirs(timestamp, exist_ok=True)
-    
+
     filename = os.path.join(timestamp, f"{prefix}_{id}.webm")
     # 'ab' mode opens the file for appending in binary mode
     with open(filename, 'ab') as f:
@@ -353,16 +353,18 @@ def upload_chunk():
 def upload_snapshot():
     session_id = request.form['session_id']
     file = request.files['snapshot']
-    
+
     os.makedirs('snapshots', exist_ok=True)
-    filename = os.path.join('snapshots', f"snapshot_{session_id}_{uuid.uuid4().hex[:6]}.jpg")
+    filename = os.path.join(
+        'snapshots', f"snapshot_{session_id}_{uuid.uuid4().hex[:6]}.jpg")
     file.save(filename)
     return "OK", 200
 
 
 def process_grid(session_id, initiator_ws):
     time.sleep(2)  # Wait for uploads
-    files = glob.glob(os.path.join("snapshots", f"snapshot_{session_id}_*.jpg"))
+    files = glob.glob(os.path.join("snapshots",
+                                   f"snapshot_{session_id}_*.jpg"))
     if not files: return
 
     images = [Image.open(f) for f in files]
