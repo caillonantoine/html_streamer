@@ -47,7 +47,12 @@ def print_qr_code(url):
     print("\n")
 
 
-connections = set()
+active_cameras = {}  # ws -> metadata (e.g., {'enabled': True})
+
+
+@app.route('/cameras')
+def get_cameras():
+    return json.dumps([{'id': str(id(ws)), 'enabled': meta['enabled']} for ws, meta in active_cameras.items()])
 
 
 @app.route('/')
@@ -82,11 +87,24 @@ def upload_snapshot():
     filename = os.path.join(
         'snapshots', f"snapshot_{session_id}_{uuid.uuid4().hex[:6]}.jpg")
     file.save(filename)
+
+    # Check if we have all images
+    if session_id in pending_snapshots:
+        data = pending_snapshots[session_id]
+        files = glob.glob(os.path.join('snapshots', f"snapshot_{session_id}_*.jpg"))
+        
+        if len(files) >= data['expected']:
+            # All received, trigger processing
+            pending_snapshots.pop(session_id)
+            threading.Thread(target=process_grid,
+                             args=(session_id, data['initiator_ws'])).start()
     return "OK", 200
 
 
+# Maps session_id -> { 'expected': int, 'initiator_ws': ws }
+pending_snapshots = {}
+
 def process_grid(session_id, initiator_ws):
-    time.sleep(2)  # Wait for uploads
     files = glob.glob(os.path.join("snapshots",
                                    f"snapshot_{session_id}_*.jpg"))
     if not files: return
@@ -125,7 +143,8 @@ def process_grid(session_id, initiator_ws):
 
 @sock.route('/stream')
 def stream(ws):
-    connections.add(ws)
+    active_cameras[ws] = {'enabled': False}
+    print(f"Camera connected. Total cameras: {len(active_cameras)}")
     try:
         while True:
             data = ws.receive()
@@ -134,18 +153,32 @@ def stream(ws):
             # We only handle string (JSON) commands now
             if isinstance(data, str):
                 cmd = json.loads(data)
+                
+                if cmd.get('action') == 'camera_started':
+                    active_cameras[ws]['enabled'] = True
+                    print(f"Camera enabled. Total enabled: {sum(c['enabled'] for c in active_cameras.values())}")
+
+                if cmd.get('action') == 'stop_all':
+                    active_cameras[ws]['enabled'] = False
+
                 if cmd.get('action') == 'snapshot':
                     session_id = uuid.uuid4().hex
-                    # Broadcast to clients
-                    for conn in connections:
-                        conn.send(
-                            json.dumps({
-                                'action': 'snapshot',
-                                'session_id': session_id
-                            }))
-                    # Start processor
-                    threading.Thread(target=process_grid,
-                                     args=(session_id, ws)).start()
+                    
+                    # Calculate how many enabled cameras we expect
+                    enabled_count = sum(1 for c in active_cameras.values() if c['enabled'])
+                    
+                    if enabled_count > 0:
+                        pending_snapshots[session_id] = {'expected': enabled_count, 'initiator_ws': ws}
+                        
+                        # Broadcast to clients
+                        for conn in active_cameras:
+                            conn.send(
+                                json.dumps({
+                                    'action': 'snapshot',
+                                    'session_id': session_id
+                                }))
+                    else:
+                        print("No enabled cameras to take snapshot.")
 
                 if cmd.get('action') == 'convert':
                     # Run conversion in background
@@ -156,11 +189,12 @@ def stream(ws):
                     print("Conversion started", file=sys.stderr)
 
                 # Broadcast command to everyone
-                for conn in connections:
+                for conn in active_cameras:
                     conn.send(data)
 
     finally:
-        connections.remove(ws)
+        del active_cameras[ws]
+        print(f"Camera disconnected. Total cameras: {len(active_cameras)}")
 
 
 if __name__ == '__main__':

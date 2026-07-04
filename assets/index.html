@@ -169,6 +169,7 @@
                         } 
                     });
                     v.srcObject = stream;
+                    ws.send(JSON.stringify({action: 'camera_started'}));
                     await refreshDevices();
                     await requestWakeLock();
                     toggleBtn.disabled = false;
