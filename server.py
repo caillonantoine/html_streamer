@@ -118,7 +118,7 @@ def convert_videos():
         mp4_file = webm_file.with_suffix('.mp4')
         subprocess.run([
             'ffmpeg', '-y', '-i',
-            str(webm_file), '-r', '30', '-crf', '15', '-preset', 'ultrafast',
+            str(webm_file), '-r', '30', '-crf', '15', '-preset', 'veryfast',
             '-b:a', '128k',
             str(mp4_file)
         ])
@@ -170,7 +170,7 @@ def convert_videos():
 
             cmd = ['ffmpeg', '-y'] + inputs + [
                 '-filter_complex', filter_complex, '-map', '[v]', '-map',
-                '[a]', '-preset', 'ultrafast',
+                '[a]', '-preset', 'ultrafast', '-crf', '20',
                 str(folder / 'grid.mp4')
             ]
             subprocess.run(cmd)
