@@ -4,6 +4,7 @@ import io
 import json
 import math
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -48,6 +49,7 @@ def print_qr_code(url):
 
 connections = set()
 
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -56,7 +58,8 @@ def index():
 @app.route('/upload_chunk', methods=['POST'])
 def upload_chunk():
     id = request.form['id']
-    prefix = request.form['prefix']
+    prefix = re.sub(r'\W+', '', request.form['prefix'].replace(" ",
+                                                               "_")).lower()
     timestamp = request.form['timestamp']
     file = request.files['chunk']
 
