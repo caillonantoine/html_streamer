@@ -10,9 +10,11 @@
             height: 100%;
             margin: 0;
             padding: 0;
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
         body { 
-            font-family: sans-serif; 
             display: flex; 
             flex-direction: row; 
             height: 100vh; 
@@ -24,12 +26,13 @@
         #controls { 
             width: 300px; 
             max-width: 100%;
-            padding: 15px; 
+            padding: 20px; 
             display: flex; 
             flex-direction: column; 
-            gap: 10px; 
-            overflow: hidden; 
-            background: #f0f0f0;
+            gap: 15px; 
+            background: #1e1e1e;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            z-index: 10;
         }
         #video-container { 
             flex: 1; 
@@ -46,14 +49,15 @@
             width: 20px;
             height: 20px;
             border-radius: 50%;
-            background-color: red;
+            background-color: #ff5252;
             display: none;
             z-index: 5;
-            animation: blink 1s infinite;
+            animation: blink 1.5s infinite;
+            box-shadow: 0 0 10px #ff5252;
         }
         @keyframes blink {
             0% { opacity: 1; }
-            50% { opacity: 0; }
+            50% { opacity: 0.5; }
             100% { opacity: 1; }
         }
         video { 
@@ -61,7 +65,32 @@
             height: 100%; 
             object-fit: contain; 
         }
-        button, select, input { width: 100%; padding: 10px; font-size: 16px; }
+        select, input, button { 
+            width: 100%; 
+            padding: 12px; 
+            font-size: 16px; 
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #2c2c2c;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        button {
+            font-weight: bold;
+            background: #007bff;
+            border: none;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        select:focus, input:focus { outline: 2px solid #007bff; }
+        #closeGridBtn {
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 16px;
+        }
     </style>
 </head>
 <body>
