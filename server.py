@@ -268,11 +268,13 @@ def stream(ws):
                     print("Conversion started", file=sys.stderr)
 
                 if cmd.get('action') == 'get_time':
-                    ws.send(
-                        json.dumps({
-                            'action': 'time_sync',
-                            'server_time': int(time.time() * 1000)
-                        }))
+                    resp = {
+                        'action': 'time_sync',
+                        'server_time': int(time.time() * 1000)
+                    }
+                    if 'client_time' in cmd:
+                        resp['client_time'] = cmd['client_time']
+                    ws.send(json.dumps(resp))
                     continue
 
                 # Handle 'start' specifically to inject a sync timestamp

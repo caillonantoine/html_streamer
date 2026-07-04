@@ -95,7 +95,7 @@
     
         const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${protocol}://${location.host}/stream`);
-        ws.onopen = () => { ws.send(JSON.stringify({action: 'get_time'})); };
+        ws.onopen = () => { ws.send(JSON.stringify({action: 'get_time', client_time: Date.now()})); };
         window.clockOffset = 0;
 
         async function requestWakeLock() {
@@ -121,8 +121,15 @@
             if (typeof event.data === 'string') {
                 const cmd = JSON.parse(event.data);
                 if (cmd.action === 'time_sync') {
-                    window.clockOffset = cmd.server_time - Date.now();
-                    console.log(`Clock sync: ${window.clockOffset}ms offset`);
+                    const now = Date.now();
+                    if (cmd.client_time) {
+                        const rtt = now - cmd.client_time;
+                        window.clockOffset = cmd.server_time + (rtt / 2) - now;
+                        console.log(`Clock sync: ${window.clockOffset}ms offset (RTT: ${rtt}ms)`);
+                    } else {
+                        window.clockOffset = cmd.server_time - now;
+                        console.log(`Clock sync: ${window.clockOffset}ms offset`);
+                    }
                 }
                 if (cmd.action === 'start') {
                     const now = Date.now() + window.clockOffset;
