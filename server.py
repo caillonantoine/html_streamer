@@ -1,10 +1,3 @@
-# dependencies = [
-#   "flask",
-#   "flask-sock",
-#   "pyOpenSSL",
-# ]
-# ///
-
 import base64
 import glob
 import io
