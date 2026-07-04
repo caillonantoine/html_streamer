@@ -34,6 +34,11 @@
             box-shadow: 2px 0 10px rgba(0,0,0,0.5);
             z-index: 10;
         }
+        .grid-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
         #video-container { 
             flex: 1; 
             display: flex; 
@@ -80,6 +85,9 @@
             font-weight: bold;
             background: #007bff;
             border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         button:hover { background: #0056b3; }
         button:disabled { background: #555; cursor: not-allowed; }
@@ -97,10 +105,20 @@
     <div id="controls">
         <select id="videoSource"></select>
         <input type="text" id="prefixInput" placeholder="Name camera">
-        <button id="cameraToggleBtn">Start Camera</button>
-        <button id="toggleBtn" disabled>Start Recording</button>
-        <button id="convertBtn">Convert Recordings to MP4</button>
-        <button id="previewBtn">Preview cameras</button>
+        <div class="grid-buttons">
+            <button id="cameraToggleBtn" data-state="start" title="Start Camera">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </button>
+            <button id="toggleBtn" disabled data-state="start" title="Start Recording">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+            </button>
+            <button id="convertBtn" title="Convert">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+            <button id="previewBtn" title="Preview">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+        </div>
     </div>
         <div id="video-container">
         <video id="v" autoplay playsinline muted></video>
@@ -151,13 +169,13 @@
             // state: 'ready', 'recording', 'finalizing'
             if (state === 'ready') {
                 toggleBtn.disabled = false;
-                toggleBtn.textContent = 'Start Recording';
+                toggleBtn.dataset.state = 'start';
                 convertBtn.disabled = false;
                 previewBtn.disabled = false;
                 cameraToggleBtn.disabled = false;
             } else if (state === 'recording') {
                 toggleBtn.disabled = false; // Stop button enabled
-                toggleBtn.textContent = 'Stop Recording';
+                toggleBtn.dataset.state = 'stop';
                 convertBtn.disabled = true;
                 previewBtn.disabled = true;
                 cameraToggleBtn.disabled = true;
@@ -226,9 +244,9 @@
                             .then(() => { wakeLock = null; console.log('Wake Lock released'); })
                             .catch((err) => console.error(`Wake Lock release error: ${err.name}, ${err.message}`));
                     }
-                    toggleBtn.textContent = 'Start Recording';
+                    toggleBtn.dataset.state = 'start';
                     toggleBtn.disabled = true;
-                    cameraToggleBtn.textContent = 'Start Camera';
+                    cameraToggleBtn.dataset.state = 'start';
                 }
             }
         };
@@ -247,7 +265,7 @@
 
         // Initialize: Get Camera Access
         cameraToggleBtn.onclick = async () => {
-            if (cameraToggleBtn.textContent === 'Start Camera') {
+            if (cameraToggleBtn.dataset.state === 'start') {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         video: { 
@@ -266,7 +284,7 @@
                     await refreshDevices();
                     await requestWakeLock();
                     toggleBtn.disabled = false;
-                    cameraToggleBtn.textContent = 'Stop All Cameras';
+                    cameraToggleBtn.dataset.state = 'stop';
                 } catch (err) {
                     alert("Camera access denied or resolution not supported: " + err);
                 }
@@ -301,7 +319,7 @@
 
         // Control buttons
         toggleBtn.onclick = () => {
-            const action = toggleBtn.textContent.includes('Start') ? 'start' : 'stop';
+            const action = toggleBtn.dataset.state === 'start' ? 'start' : 'stop';
             ws.send(JSON.stringify({action: action}));
         };
         convertBtn.onclick = () => ws.send(JSON.stringify({action: 'convert'}));
@@ -331,7 +349,8 @@
             document.getElementById('recording-indicator').style.display = 'block';
             const recordingId = uuidv4(); 
             const prefix = document.getElementById('prefixInput').value || 'stream';
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const now = new Date(Date.now() + window.clockOffset);
+            const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
             try {
                 recorder = new MediaRecorder(v.srcObject, { 
                     mimeType: 'video/webm',
