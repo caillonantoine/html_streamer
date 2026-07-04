@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -112,14 +113,68 @@ pending_snapshots = {}
 
 
 def convert_videos():
+    # Convert all webm to mp4
     for webm_file in Path('.').rglob('*.webm'):
         mp4_file = webm_file.with_suffix('.mp4')
         subprocess.run([
             'ffmpeg', '-y', '-i',
-            str(webm_file), '-r', '30', '-crf', '15', '-b:a', '128k',
+            str(webm_file), '-r', '30', '-crf', '15', '-preset', 'ultrafast',
+            '-b:a', '128k',
             str(mp4_file)
         ])
         webm_file.unlink()  # removes the original
+
+    # Create grids for all folders that have mp4s and no grid.mp4
+    for folder in Path('.').iterdir():
+        if folder.is_dir() and folder.name not in ['.', '..', 'snapshots']:
+            if (folder / 'grid.mp4').exists():
+                continue
+
+            mp4_files = sorted(list(folder.glob('*.mp4')))
+            if len(mp4_files) < 2:
+                continue
+
+            n = len(mp4_files)
+            cols = math.ceil(math.sqrt(n))
+
+            # Build inputs and layout
+            inputs = []
+            for f in mp4_files:
+                inputs.extend(['-i', str(f)])
+
+            # Prepare inputs with scaling to standard 640x360 size
+            filter_parts = []
+            video_labels = []
+            audio_labels = []
+
+            for i in range(n):
+                # Scale each video to 640x360 (padding with black to keep aspect ratio if needed) and normalize pixel format
+                filter_parts.append(
+                    f"[{i}:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,setsar=1[v{i}]"
+                )
+                video_labels.append(f"[v{i}]")
+                audio_labels.append(f"[{i}:a]")
+
+            # Layout string for xstack (since all are now 640x360, we can use absolute coordinates)
+            layout_parts = []
+            for i in range(n):
+                c = i % cols
+                r = i // cols
+                layout_parts.append(f"{640 * c}_{360 * r}")
+            layout = "|".join(layout_parts)
+
+            video_filter = f"{''.join(video_labels)}xstack=inputs={n}:layout={layout}[v]"
+            audio_filter = f"{''.join(audio_labels)}amix=inputs={n}:duration=longest[a]"
+            filter_complex = ";".join(filter_parts +
+                                      [video_filter, audio_filter])
+
+            cmd = ['ffmpeg', '-y'] + inputs + [
+                '-filter_complex', filter_complex, '-map', '[v]', '-map',
+                '[a]', '-preset', 'ultrafast',
+                str(folder / 'grid.mp4')
+            ]
+            subprocess.run(cmd)
+            print(f"Created grid.mp4 in {folder}")
 
 
 def process_grid(session_id, initiator_ws):
@@ -211,6 +266,28 @@ def stream(ws):
                     # Run conversion in background
                     threading.Thread(target=convert_videos).start()
                     print("Conversion started", file=sys.stderr)
+
+                if cmd.get('action') == 'get_time':
+                    ws.send(
+                        json.dumps({
+                            'action': 'time_sync',
+                            'server_time': int(time.time() * 1000)
+                        }))
+                    continue
+
+                # Handle 'start' specifically to inject a sync timestamp
+                if cmd.get('action') == 'start':
+                    start_at = int(time.time() * 1000) + 1000
+                    data = json.dumps({
+                        'action': 'start',
+                        'start_at': start_at
+                    })
+                    for conn in list(active_cameras.keys()):
+                        try:
+                            conn.send(data)
+                        except Exception:
+                            pass
+                    continue
 
                 # Broadcast command to everyone
                 for conn in list(active_cameras.keys()):
