@@ -146,6 +146,29 @@
             }
         });
 
+        // Start Record / Stop Record / Finalizing states
+        function updateUIState(state) {
+            // state: 'ready', 'recording', 'finalizing'
+            if (state === 'ready') {
+                toggleBtn.disabled = false;
+                toggleBtn.textContent = 'Start Recording';
+                convertBtn.disabled = false;
+                previewBtn.disabled = false;
+                cameraToggleBtn.disabled = false;
+            } else if (state === 'recording') {
+                toggleBtn.disabled = false; // Stop button enabled
+                toggleBtn.textContent = 'Stop Recording';
+                convertBtn.disabled = true;
+                previewBtn.disabled = true;
+                cameraToggleBtn.disabled = true;
+            } else if (state === 'finalizing') {
+                toggleBtn.disabled = true; // Stop button disabled
+                convertBtn.disabled = true;
+                previewBtn.disabled = true;
+                cameraToggleBtn.disabled = true;
+            }
+        }
+
         ws.onmessage = (event) => {
             if (typeof event.data === 'string') {
                 const cmd = JSON.parse(event.data);
@@ -167,13 +190,17 @@
                     console.log(`Starting in ${delay}ms`);
                     setTimeout(() => {
                         startLocalRecording();
-                        toggleBtn.textContent = 'Stop Recording';
+                        updateUIState('recording');
                     }, delay);
                 }
                 if (cmd.action === 'stop') {
+                    updateUIState('finalizing');
                     stopLocalRecording();
-                    toggleBtn.textContent = 'Start Recording';
                 }
+                if (cmd.action === 'all_finished') {
+                    updateUIState('ready');
+                }
+                // ... (rest of the existing handlers)
                 if (cmd.action === 'snapshot') {
                     takeSnapshot(cmd.session_id);
                 }
@@ -296,35 +323,51 @@
         }
 
         function startLocalRecording() {
+            if (!v.srcObject) {
+                console.error("No video stream found, cannot start recording.");
+                return;
+            }
+            console.log("Starting local recording...");
             document.getElementById('recording-indicator').style.display = 'block';
             const recordingId = uuidv4(); 
             const prefix = document.getElementById('prefixInput').value || 'stream';
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            recorder = new MediaRecorder(v.srcObject, { 
-                mimeType: 'video/webm',
-                videoBitsPerSecond: 4000000 // Reduced to 4 Mbps for stability
-            });
-            
-            recorder.onerror = (e) => {
-                alert("Recorder error: " + e.error);
-                stopLocalRecording();
-            };
-            
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    const formData = new FormData();
-                    formData.append('id', recordingId);
-                    formData.append('prefix', prefix);
-                    formData.append('timestamp', timestamp);
-                    formData.append('chunk', e.data);
-                    
-                    uploadQueue = uploadQueue.then(() => 
-                        fetch('/upload_chunk', { method: 'POST', body: formData })
-                    ).catch(err => console.error("Upload failed", err));
-                }
-            };
-            
-            recorder.start(2000); 
+            try {
+                recorder = new MediaRecorder(v.srcObject, { 
+                    mimeType: 'video/webm',
+                    videoBitsPerSecond: 4000000 // Reduced to 4 Mbps for stability
+                });
+                
+                recorder.onerror = (e) => {
+                    console.error("Recorder error:", e.error);
+                    stopLocalRecording();
+                };
+                
+                recorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        const formData = new FormData();
+                        formData.append('id', recordingId);
+                        formData.append('prefix', prefix);
+                        formData.append('timestamp', timestamp);
+                        formData.append('chunk', e.data);
+                        
+                        uploadQueue = uploadQueue.then(() => 
+                            fetch('/upload_chunk', { method: 'POST', body: formData })
+                        ).catch(err => console.error("Upload failed", err));
+                    }
+                };
+                
+                recorder.onstop = () => {
+                    // Wait for the queue to finish, then send 'finished_upload'
+                    uploadQueue.then(() => {
+                        ws.send(JSON.stringify({action: 'finished_upload'}));
+                    });
+                };
+
+                recorder.start(2000); 
+            } catch (err) {
+                console.error("Failed to create MediaRecorder:", err);
+            }
         }
 
         function stopLocalRecording() {

@@ -50,7 +50,7 @@ def print_qr_code(url):
     print("\n")
 
 
-active_cameras = {}  # ws -> metadata (e.g., {'enabled': True})
+active_cameras = {}  # ws -> metadata (e.g., {'enabled': True, 'recording': False})
 
 
 @app.route('/cameras')
@@ -216,7 +216,7 @@ def process_grid(session_id, initiator_ws):
 
 @sock.route('/stream')
 def stream(ws):
-    active_cameras[ws] = {'enabled': False}
+    active_cameras[ws] = {'enabled': False, 'recording': False}
     print(f"Camera connected. Total cameras: {len(active_cameras)}")
     try:
         while True:
@@ -279,6 +279,10 @@ def stream(ws):
 
                 # Handle 'start' specifically to inject a sync timestamp
                 if cmd.get('action') == 'start':
+                    # Set recording to True for everyone
+                    for conn in active_cameras:
+                        active_cameras[conn]['recording'] = True
+                    
                     start_at = int(time.time() * 1000) + 1000
                     data = json.dumps({
                         'action': 'start',
@@ -289,6 +293,30 @@ def stream(ws):
                             conn.send(data)
                         except Exception:
                             pass
+                    continue
+                
+                # Handle 'stop' -> wait for signal that they finished
+                if cmd.get('action') == 'stop':
+                     # We don't mark as false yet, we wait for 'finished_upload'
+                     data = json.dumps({'action': 'stop'})
+                     for conn in list(active_cameras.keys()):
+                        try:
+                            conn.send(data)
+                        except Exception:
+                            pass
+                     continue
+                
+                if cmd.get('action') == 'finished_upload':
+                    active_cameras[ws]['recording'] = False
+                    # Check if all are finished
+                    if all(not c['recording'] for c in active_cameras.values() if c['enabled']):
+                        # All finished!
+                        data = json.dumps({'action': 'all_finished'})
+                        for conn in list(active_cameras.keys()):
+                            try:
+                                conn.send(data)
+                            except Exception:
+                                pass
                     continue
 
                 # Broadcast command to everyone
